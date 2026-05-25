@@ -65,7 +65,7 @@ jobs:
 
             - name: Staged Publish to npm with provenance
               if: steps.tag-check.outputs.exists == 'false'
-              run: npm stage publish --access public
+              run: npm stage publish
 
             - name: Create GitHub Release with tag
               id: create-release
