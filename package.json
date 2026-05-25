@@ -1,6 +1,6 @@
 {
     "name": "@azu/simple-npm-staged-publish-package-example",
-    "version": "3.1.9",
+    "version": "3.1.10",
     "description": "An OIDC example",
     "main": "index.js",
     "repository": {
