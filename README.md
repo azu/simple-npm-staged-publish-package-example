@@ -1,109 +1,102 @@
-# simple-oidc-example-package
+# simple-npm-staged-publish-package-example
 
-A minimal example package demonstrating npm Trusted Publishing with OIDC (OpenID Connect).
+A minimal example demonstrating npm **Staged Publishing** with GitHub Actions OIDC Trusted Publishers.
 
 ## Overview
 
-This package serves as a reference implementation for setting up npm Trusted Publishing, enabling secure package publishing without storing npm tokens in CI/CD environments.
+This package shows a token-less release flow that requires two human approvals before a version becomes public on npm.
 
-## Features
+- GitHub Environment protection rule gates the publish workflow
+- npm staged publish approval gates the actual promotion to the public registry
+- No npm tokens are stored — authentication uses GitHub Actions OIDC
+- Provenance attestation is generated automatically
 
-- **Token-less Publishing**: Publishes to npm using OIDC authentication instead of long-lived tokens
-- **GitHub Actions Integration**: Automated release workflow with GitHub Actions
-- **Provenance Attestation**: Automatically generates cryptographic attestations for package builds
-- **Secure Release Process**: Two-step release process with PR review before publishing
+## Release flow
+
+```mermaid
+flowchart TD
+    A[1. Create release PR] --> B[2. Review & merge release PR]
+    B --> C[3. Approve GitHub Environment review]
+    C --> D[4. release.yml runs]
+    D --> E[5. npm publish with OIDC + provenance]
+    E --> F[6. Tarball enters npm staged area]
+    F --> G[7. Approve staged publish on npmjs.com]
+    G --> H[8. Version becomes public]
+```
+
+| Step | Where | Actor | Description |
+| --- | --- | --- | --- |
+| 1 | GitHub Actions | maintainer | Run `create-release-pr.yml` to open a version-bump PR with the `Type: Release` label |
+| 2 | GitHub PR | reviewer | Review and merge the release PR |
+| 3 | GitHub Environment `npm` | reviewer | Approve the deployment to allow the workflow to start |
+| 4 | GitHub Actions | — | `release.yml` runs on the merged PR |
+| 5 | npm registry | — | `npm publish` runs with OIDC authentication and provenance |
+| 6 | npm registry | — | Tarball is staged (not yet visible to consumers) |
+| 7 | npm web UI | maintainer | Approve the staged publish on npmjs.com |
+| 8 | npm registry | — | Version is promoted and installable |
 
 ## Workflows
 
-### 1. Create Release PR (`create-release-pr.yml`)
+### `create-release-pr.yml`
 
-Creates a release pull request with version bump and auto-generated release notes.
+Opens a release PR. Triggered manually with a version-bump type (`patch` / `minor` / `major`). Generates release notes and applies the `Type: Release` label.
 
-**Trigger**: Manual workflow dispatch with version type selection (patch/minor/major)
+### `release.yml`
 
-**Steps**:
-1. Bumps package version
-2. Generates release notes from previous release
-3. Creates a draft PR with release changes
+Publishes to npm when a PR labeled `Type: Release` is merged. Uses `environment: npm` (gated by required reviewers) and `id-token: write` (for OIDC).
 
-### 2. Release (`release.yml`)
+## Setup
 
-Automatically publishes to npm when a release PR is merged.
+### 1. npm Trusted Publisher
 
-**Trigger**: 
-- When PR with `Type: Release` label is merged
-- Manual workflow dispatch with specific version
+Go to your npm package's Settings → Trusted Publisher and register GitHub Actions with:
 
-**Steps**:
-1. Checks if release tag already exists (idempotency)
-2. Publishes package to npm with provenance
-3. Creates GitHub Release
-4. Comments on PR with release status
+| Field | Value |
+| --- | --- |
+| Organization / user | Your GitHub user or org |
+| Repository | This repository's name (must match exactly) |
+| Workflow filename | `release.yml` |
+| Environment name | `npm` |
 
-## Setup Instructions
+The OIDC token's `repository`, `workflow`, and `environment` claims are checked against these values. A mismatch causes `E401 Unable to authenticate`.
 
-### Prerequisites
+### 2. `package.json` repository URL
 
-- npm account with 2FA enabled
-- GitHub repository
-- Node.js LTS version
+`repository.url` in `package.json` must point to the same repository registered with the Trusted Publisher. If it diverges, provenance verification fails with:
 
-### Configure npm Trusted Publisher
+```
+E422 Failed to validate repository information
+```
 
-1. Go to your package settings on [npmjs.com](https://www.npmjs.com/)
-2. Navigate to the "Trusted Publisher" section
-3. Add GitHub Actions configuration:
-   - **Organization/User**: Your GitHub username or org
-   - **Repository**: Repository name
-   - **Workflow filename**: `release.yml`
-   - **Environment** (optional): Leave empty
+### 3. GitHub Environment
 
-### Repository Setup
+Create an environment named `npm` (Settings → Environments → New environment) and add required reviewers. This is what gates step 3 of the release flow.
 
-1. **Enable GitHub Actions PR creation**:
-   - Go to Settings → Actions → General
-   - Enable "Allow GitHub Actions to create and approve pull requests"
+### 4. Repository settings
 
-2. **Add release label**:
-   - Create a label named `Type: Release` in your repository
-
-3. **Add workflows**:
-   - Copy the workflow files from `.github/workflows/` to your repository
-
-## Usage
-
-### Creating a Release
-
-1. Go to Actions → Create Release PR
-2. Select version type (patch/minor/major)
-3. Review and edit the generated PR
-4. Merge the PR to trigger automatic publishing
-
-### Manual Release
-
-You can also trigger a release manually:
-1. Go to Actions → Release
-2. Enter the version to publish
-3. Run the workflow
-
-## Security Best Practices
-
-- **No npm tokens in CI**: Uses temporary OIDC tokens instead
-- **Provenance generation**: Cryptographically verifiable build attestations
-- **Token publishing disabled**: After setup, disable token-based publishing in npm settings
-- **Required 2FA**: Enforces two-factor authentication for all maintainers
+- Settings → Actions → General → enable **Allow GitHub Actions to create and approve pull requests**
+- Create a label named `Type: Release`
 
 ## Requirements
 
-- npm CLI version 11.5.1 or higher (for OIDC support)
-- GitHub-hosted runners (self-hosted runners not currently supported)
-- Public repository (private repos cannot generate provenance)
+- npm CLI ≥ 11.5.1 (OIDC and staged publish support)
+- GitHub-hosted runner (self-hosted runners are not supported for provenance)
+- Public repository (provenance is not generated for private repos)
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+| --- | --- | --- |
+| `E401 Unable to authenticate` | Trusted Publisher repo/workflow/environment does not match the OIDC token claims | Align npm Trusted Publisher settings with the actual workflow location |
+| `E422 Failed to validate repository information` | `package.json`'s `repository.url` does not match the provenance source | Update `repository.url` to point to the actual repository |
+| Workflow does not start after merge | GitHub Environment is awaiting approval | Approve the deployment under the PR's checks or the Actions run page |
 
 ## Links
 
-- [npm Trusted Publishing Documentation](https://docs.npmjs.com/trusted-publishers)
-- [GitHub OIDC Documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
-- [Package on npm](https://www.npmjs.com/package/simple-oidc-example-package)
+- [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers)
+- [npm Staged Publish](https://docs.npmjs.com/cli/commands/npm-publish#staged-publishes)
+- [GitHub OIDC](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+- [Package on npm](https://www.npmjs.com/package/@azu/simple-npm-staged-publish-package-example)
 
 ## License
 
